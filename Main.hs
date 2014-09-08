@@ -6,7 +6,7 @@ import Control.Applicative ((<*), (*>), liftA3, Applicative)
 import Data.Decimal
 
 import Text.ParserCombinators.Parsec
-import Text.ParserCombinators.Parsec.Number (fractional, nat)
+import Text.ParserCombinators.Parsec.Number (fractional, int, nat)
 
 import Debug.Trace (trace, traceShow)
 
@@ -48,8 +48,15 @@ parseEvent = do
   -- <|> unhandledEvent
   where timestampedEvent t = do
           try (parseParallelScavenge t)
+          <|> try (parseParNew t)
+          <|> try (parseSerialNew t)
+          <|> try (parseSerialOld t)
+          <|> try (parseSerialSerial t)
+          <|> try (parseSerialSerialPerm t)
           <|> try (parseParallelSerialOld t)
           <|> try (parseParallelOldCompacting t)
+          <|> try (parseVerboseGcYoungEvent t)
+          <|> try (parseVerboseGcOldEvent t)
         parseParallelScavenge t = do
           string "[GC"
           optionMaybe $ string "--" -- happens when the JVM is stressed
@@ -60,6 +67,61 @@ parseEvent = do
           timing <- optionMaybe (char ' ' >> parseTimesBlock)
           many (char ' ')
           return $ mkParallelScavengeEvent t dur timing young combined
+        parseParNew t = do
+          string "[GC"
+          optionMaybe $ string "--" -- happens when the JVM is stressed
+          young <- surroundedBy (string " [ParNew: ") parseRegion (string "]")
+          combined <- surroundedBy (char ' ') parseRegion (string ", ")
+          dur <- parseDuration
+          string "]"
+          timing <- optionMaybe (char ' ' >> parseTimesBlock)
+          many (char ' ')
+          return $ mkParNewEvent t dur timing young combined
+        parseSerialNew t = do
+          char '['
+          optionMaybe $ string "Full" -- old JVM emit this incorrectly
+          string "GC"
+          young <- parseDefNew
+          combined <- surroundedBy (char ' ') parseRegion (string ", ")
+          dur <- parseDuration
+          string "]"
+          timing <- optionMaybe (char ' ' >> parseTimesBlock)
+          many (char ' ')
+          return $ mkSerialNewEvent t dur timing young combined
+        parseSerialOld t = do
+          string "[Full GC"
+          optionMaybe $ string " (System)"
+          old <- parseTenured
+          combined <- surroundedBy (char ' ') parseRegion (string " ")
+          perm <- surroundedBy (string "[Perm: ") parseRegion (string "], ")
+          dur <- parseDuration
+          string "]"
+          timing <- optionMaybe (char ' ' >> parseTimesBlock)
+          many (char ' ')
+          return $ mkSerialOldEvent t dur timing old combined perm
+        parseSerialSerial t = do
+          string "[GC"
+          optionMaybe $ string " (System)"
+          young <- parseDefNew
+          old <- parseTenured
+          combined <- surroundedBy (char ' ') parseRegion (string ", ")
+          dur <- parseDuration
+          string "]"
+          timing <- optionMaybe (char ' ' >> parseTimesBlock)
+          many (char ' ')
+          return $ mkSerialSerialEvent t dur timing young old combined
+        parseSerialSerialPerm t = do
+          string "[GC"
+          optionMaybe $ string " (System)"
+          young <- parseDefNew
+          old <- parseTenured
+          combined <- surroundedBy (char ' ') parseRegion (string " ")
+          perm <- surroundedBy (string "[Perm: ") parseRegion (string "], ")
+          dur <- parseDuration
+          string "]"
+          timing <- optionMaybe (char ' ' >> parseTimesBlock)
+          many (char ' ')
+          return $ mkSerialSerialPermEvent t dur timing young old combined perm
         parseParallelSerialOld t = do
           string "[Full GC"
           optionMaybe $ string " (System)"
@@ -83,7 +145,31 @@ parseEvent = do
           string "]"
           timing <- optionMaybe (char ' ' >> parseTimesBlock)
           many (char ' ')
-          return $ mkParallelSerialOldEvent t dur timing young old combined perm
+          return $ mkParallelOldCompactingEvent t dur timing young old combined perm
+        parseVerboseGcYoungEvent t = do
+          combined <- surroundedBy (string "[GC ") parseRegion (string ", ")
+          dur <- parseDuration
+          string "]"
+          timing <- optionMaybe (char ' ' >> parseTimesBlock)
+          many (char ' ')
+          return $ mkVerboseGcYoungEvent t dur timing combined
+        parseVerboseGcOldEvent t = do
+          combined <- surroundedBy (string "[Full GC ") parseRegion (string ", ")
+          dur <- parseDuration
+          string "]"
+          timing <- optionMaybe (char ' ' >> parseTimesBlock)
+          many (char ' ')
+          return $ mkVerboseGcYoungEvent t dur timing combined
+parseDefNew = do
+  parseTimestamp >> string ": [DefNew"
+  young <- parseRegion
+  string ", " >> parseDuration >> string "]"
+  return young
+parseTenured = do
+  parseTimestamp >> string ": [Tenured"
+  old <- parseRegion
+  string ", " >> parseDuration >> string "]"
+  return old
 
 parseRegion :: GenParser Char st RegionUsage
 parseRegion = do
@@ -116,14 +202,23 @@ parseTimestamp :: GenParser Char st Timestamp
 parseTimestamp = do
   try parseTime
   <|> parseDateAndTime
-  <|> parseDate -- is this needed?
+  <|> parseDate
   where parseTime = do
           time <- fractional <* string ": "
-          return $ Timestamp time Nothing
-        parseDateAndTime = do
-          fail "Not yet implemented"
+          return $ Timestamp (Just time) Nothing
         parseDate = do
-          fail "Not yet implemented"
+          year <- nat <* char '-'
+          month <- nat <* char '-'
+          day <- nat <* char 'T'
+          hour <- nat <* char ':'
+          min <- nat <* char ':'
+          sec <- fractional
+          oneOf "-+" >> nat >> string ": " -- GMT offset
+          return $ Timestamp Nothing (Just $ show (year,month,day,hour,min,sec))
+        parseDateAndTime = do
+          Timestamp _ d <- parseDate
+          Timestamp t _ <- parseTime
+          return $ Timestamp t d
   
 parseApplicationStopTime :: GenParser Char st Event
 parseApplicationStopTime = do
