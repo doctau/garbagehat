@@ -1,7 +1,8 @@
 import GarbageHat.Domain
 
 import System.Environment (getArgs)
-import Control.Monad (mapM_, liftM2)
+import Control.Monad (mapM_)
+import Control.Applicative ((<*), (*>), liftA3, Applicative)
 import Data.Decimal
 
 import Text.ParserCombinators.Parsec
@@ -33,16 +34,7 @@ parseInput :: String -> String -> Either ParseError [Event]
 parseInput name input = parse parseLines name input
 
 parseLines :: GenParser Char st [Event]
-parseLines = do -- use endBy eol line
-    result <- many line
-    eof
-    return result
-
-line :: GenParser Char st Event
-line = do
-  result <- parseEvent
-  eol
-  return result
+parseLines = endBy parseEvent eol
 
 eol :: GenParser Char st ()
 eol = do
@@ -57,18 +49,12 @@ parseEvent = do
   where timestampedEvent t = do
           try (parseParallelScavenge t)
           <|> try (parseParallelSerialOld t)
+          <|> try (parseParallelOldCompacting t)
         parseParallelScavenge t = do
           string "[GC"
           optionMaybe $ string "--" -- happens when the JVM is stressed
-          -- young gen
-          string " [PSYoungGen: "
-          young <- parseRegion
-          string "]"
-          -- combined heap usage
-          char ' '
-          combined <- parseRegion
-          -- timing info
-          string ", "
+          young <- surroundedBy (string " [PSYoungGen: ") parseRegion (string "]")
+          combined <- surroundedBy (char ' ') parseRegion (string ", ")
           dur <- parseDuration
           string "]"
           timing <- optionMaybe (char ' ' >> parseTimesBlock)
@@ -76,24 +62,23 @@ parseEvent = do
           return $ mkParallelScavengeEvent t dur timing young combined
         parseParallelSerialOld t = do
           string "[Full GC"
-          optionMaybe $ string " (System)" -- happens when the JVM is stressed
-          -- young gen
-          string " [PSYoungGen: "
-          young <- parseRegion
+          optionMaybe $ string " (System)"
+          young <- surroundedBy (string " [PSYoungGen: ") parseRegion (string "]")
+          old <- surroundedBy (string " [PSOldGen: ") parseRegion (string "]")
+          combined <- surroundedBy (char ' ') parseRegion (string " ")
+          perm <- surroundedBy (string "[PSPermGen: ") parseRegion (string "], ")
+          dur <- parseDuration
           string "]"
-          -- old gen
-          try (string " [PSOldGen: ") <|> try (string " [ParOldGen: ")
-          old <- parseRegion
-          string "]"
-          -- combined heap usage
-          char ' '
-          combined <- parseRegion
-          -- perm gen
-          string " [PSPermGen: "
-          perm <- parseRegion
-          string "]"
-          -- timing info
-          string ", "
+          timing <- optionMaybe (char ' ' >> parseTimesBlock)
+          many (char ' ')
+          return $ mkParallelSerialOldEvent t dur timing young old combined perm
+        parseParallelOldCompacting t = do
+          string "[Full GC"
+          optionMaybe $ string " (System)"
+          young <- surroundedBy (string " [PSYoungGen: ") parseRegion (string "]")
+          old <- surroundedBy (string " [ParOldGen: ") parseRegion (string "]")
+          combined <- surroundedBy (char ' ') parseRegion (string " ")
+          perm <- surroundedBy (string "[PSPermGen: ") parseRegion (string "], ")
           dur <- parseDuration
           string "]"
           timing <- optionMaybe (char ' ' >> parseTimesBlock)
@@ -105,16 +90,11 @@ parseRegion = do
   before <- parseSize
   string "->"
   after <- parseSize
-  string "("
-  capacity <- parseSize
-  string ")"
+  capacity <- surroundedBy (string "(") parseSize (string ")")
   return $ RegionUsage before after capacity
 
 parseDuration :: GenParser Char st Duration
-parseDuration = do
-  d <- fractional
-  string " secs"
-  return $ Duration d
+parseDuration = fmap Duration $ fractional <* string " secs"
 
 parseSize :: GenParser Char st Integer
 parseSize = do
@@ -125,12 +105,9 @@ parseSize = do
 
 parseTimesBlock :: GenParser Char st TimingInfo
 parseTimesBlock = do
-  string "[Times: user="
-  user <- fractional
-  string " sys="
-  sys <- fractional
-  string ", real="
-  real <- fractional
+  user <- string "[Times: user=" *> fractional
+  sys <- string " sys=" *> fractional
+  real <- string ", real=" *> fractional
   string " secs]"
   return $ TimingInfo user sys real
 
@@ -141,8 +118,7 @@ parseTimestamp = do
   <|> parseDateAndTime
   <|> parseDate -- is this needed?
   where parseTime = do
-          time <- fractional
-          string ": "
+          time <- fractional <* string ": "
           return $ Timestamp time Nothing
         parseDateAndTime = do
           fail "Not yet implemented"
@@ -151,19 +127,9 @@ parseTimestamp = do
   
 parseApplicationStopTime :: GenParser Char st Event
 parseApplicationStopTime = do
-  string "Application time: "
-  ran <- fmap Duration fractional
-  string " seconds"
-  eol
-  inner <- many $ do
-    e <- parseEvent
-    eol
-    return e
-  stopped <- optionMaybe $ do
-    string "Total time for which application threads were stopped: "
-    stopped <- fmap Duration fractional
-    string " seconds"
-    return stopped
+  ran <- fmap Duration $ surroundedBy (string "Application time: ") fractional (string " seconds\n")
+  inner <- endBy parseEvent eol -- there may be GC events between the pair
+  stopped <- optionMaybe $ fmap Duration $ surroundedBy (string "Total time for which application threads were stopped: ") fractional (string " seconds")
   return $ mkApplicationStopEvent ran stopped inner
 
 
@@ -172,26 +138,6 @@ unhandledEvent = do
   s <- many1 (noneOf "\n")
   return $ mkUnparsableLineEvent s
 
+surroundedBy :: Applicative m => m a -> m b -> m c -> m b
+surroundedBy =  liftA3 (\_ a _ -> a)
 
---    private static final String REGEX = "^" + JdkRegEx.TIMESTAMP + ": \\[GC(--)? \\[PSYoungGen: " + JdkRegEx.SIZE
---            + "->" + JdkRegEx.SIZE + "\\(" + JdkRegEx.SIZE + "\\)\\] " + JdkRegEx.SIZE + "->" + JdkRegEx.SIZE + "\\("
---            + JdkRegEx.SIZE + "\\), " + JdkRegEx.DURATION + "\\]" + JdkRegEx.TIMES_BLOCK + "?[ ]*$";
---    private static final Pattern PATTERN = Pattern.compile(ParallelScavengeEvent.REGEX);
---
---        this.logEntry = logEntry;
---        Matcher matcher = PATTERN.matcher(logEntry);
---        if (matcher.find()) {
---           timestamp = JdkMath.convertSecsToMillis(matcher.group(1)).longValue();
---            young = Integer.parseInt(matcher.group(3));
---            youngEnd = Integer.parseInt(matcher.group(4));
---            youngAvailable = Integer.parseInt(matcher.group(5));
---            int totalBegin = Integer.parseInt(matcher.group(6));
---            old = totalBegin - young;
---            int totalEnd = Integer.parseInt(matcher.group(7));
---            oldEnd = totalEnd - youngEnd;
---            int totalAllocation = Integer.parseInt(matcher.group(8));
---            oldAllocation = totalAllocation - youngAvailable;
---            duration = JdkMath.convertSecsToMillis(matcher.group(9)).intValue();
---        } else {
---            throw new IllegalArgumentException("log entry did not match " + REGEX);
---        }

@@ -76,6 +76,27 @@ instance PermData ParallelSerialOldEvent where
   permData (ParallelSerialOldEvent _ _ _ _ _ _ p) = p
 
 
+-- parallel old compacting event
+-- New throughput collector introduced in JDK 5 update 6 and significantly enhanced in JDK 6. Enabled with the -XX:+UseParallelOldGC JVM option
+-- Standard: 2182.541: [Full GC [PSYoungGen: 1940K->0K(98560K)] [ParOldGen: 813929K->422305K(815616K)] 815869K->422305K(914176K) [PSPermGen: 81960K->81783K(164352K)], 2.4749181 secs]
+-- Alternate: 2.417: [Full GC (System) [PSYoungGen: 1788K->0K(12736K)] [ParOldGen: 1084K->2843K(116544K)] 2872K->2843K(129280K) [PSPermGen: 8602K->8593K(131072K)], 0.1028360 secs]
+data ParallelOldCompactingEvent = ParallelOldCompactingEvent Timestamp Duration (Maybe TimingInfo) RegionUsage RegionUsage RegionUsage RegionUsage deriving (Eq, Show)
+instance TimestampedEvent ParallelOldCompactingEvent where
+  timestamp (ParallelOldCompactingEvent t _ _ _ _ _ _) = t
+instance BlockingEvent ParallelOldCompactingEvent where
+  duration (ParallelOldCompactingEvent _ d _ _ _ _ _) = d
+instance TimedEvent ParallelOldCompactingEvent where
+  timingInfo (ParallelOldCompactingEvent _ _ t _ _ _ _) = t
+instance YoungData ParallelOldCompactingEvent where
+  youngData (ParallelOldCompactingEvent _ _ _ y _ _ _) = y
+instance OldData ParallelOldCompactingEvent where
+  oldData (ParallelOldCompactingEvent _ _ _ _ o _ _) = o
+instance CombinedData ParallelOldCompactingEvent where
+  combinedData (ParallelOldCompactingEvent _ _ _ _ _ c _) = c
+instance PermData ParallelOldCompactingEvent where
+  permData (ParallelOldCompactingEvent _ _ _ _ _ _ p) = p
+
+
 data ApplicationStopEvent = ApplicationStopEvent Duration (Maybe Duration) [Event] deriving (Eq, Show)
 instance BlockingEvent ApplicationStopEvent where
   duration (ApplicationStopEvent _ Nothing _) = Duration $ fromIntegral 0
@@ -84,11 +105,20 @@ instance BlockingEvent ApplicationStopEvent where
 
 data Event = ParallelScavengeEvent_ ParallelScavengeEvent
            | ParallelSerialOldEvent_ ParallelSerialOldEvent
+           | ParallelOldCompactingEvent_ ParallelOldCompactingEvent
            | ApplicationStopEvent_ ApplicationStopEvent
            | UnparsableLineEvent_ UnparsableLineEvent
-           deriving (Eq, Show)
+           deriving (Eq)
+instance Show Event where
+  show (ParallelScavengeEvent_ e) = show e
+  show (ParallelOldCompactingEvent_ e) = show e
+  show (ParallelSerialOldEvent_ e) = show e
+  show (ApplicationStopEvent_ e) = show e
+  show (UnparsableLineEvent_ e) = show e
 
 mkParallelScavengeEvent t d ti y c = ParallelScavengeEvent_ (ParallelScavengeEvent t d ti y c)
 mkParallelSerialOldEvent t d ti y c o p = ParallelSerialOldEvent_ (ParallelSerialOldEvent t d ti y o c p)
+mkParallelOldCompactingEvent t d ti y c o p = ParallelOldCompactingEvent_ (ParallelOldCompactingEvent t d ti y o c p)
 mkUnparsableLineEvent s = UnparsableLineEvent_ (UnparsableLineEvent s)
 mkApplicationStopEvent d s inner = ApplicationStopEvent_ (ApplicationStopEvent d s inner)
+
