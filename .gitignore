@@ -1,4 +1,5 @@
 cabal.sandbox.config
 dist
 .cabal-sandbox
+*~
 .*.swp
