@@ -1,5 +1,32 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module GarbageHat.Domain where
+module GarbageHat.Domain(
+  Timestamp(..), TimingInfo(..), RegionUsage(..),
+  Duration(..), getDuration,
+
+  NamedEvent(..), TimestampedEvent(..), BlockingEvent(..), ConcurrentEvent(..), TimedEvent(..),
+  YoungData(..), OldData(..), CombinedData(..), PermData(..), RegionData(..),
+
+  UnparsableLineEvent(..),
+  ParallelScavengeEvent(..), ParallelSerialOldEvent(..), ParallelOldCompactingEvent(..), ParNewEvent(..),
+  SerialNewEvent(..), SerialOldEvent(..), SerialSerialEvent(..), SerialSerialPermEvent(..),
+  VerboseGcOldEvent(..), VerboseGcYoungEvent(..),
+  G1YoungPause(..), G1MixedPause(..), G1YoungInitialMarkEvent(..), G1CleanupEvent(..), G1RemarkEvent(..),
+  G1FullGCEvent(..), G1ConcurrentRootRegionScanStart(..), G1ConcurrentRootRegionScanEnd(..),
+  G1ConcurrentCleanupStart(..), G1ConcurrentCleanupEnd(..), G1ConcurrentMarkStart(..), G1ConcurrentMarkEnd(..),
+  ApplicationStopEvent(..), PrintHeapAtGcEvent(..),
+
+  Event(..), -- FIXME: remove the ctors
+
+  mkParallelScavengeEvent, mkParallelSerialOldEvent, mkParallelOldCompactingEvent, mkParNewEvent,
+  mkSerialNewEvent, mkSerialOldEvent, mkSerialSerialEvent ,mkSerialSerialPermEvent,
+  mkVerboseGcOldEvent, mkVerboseGcYoungEvent,
+  mkG1YoungPause, mkG1MixedPause, mkG1YoungInitialMarkEvent ,mkG1CleanupEvent,
+  mkG1RemarkEvent, mkG1FullGCEvent,
+  mkG1ConcurrentRootRegionScanStart, mkG1ConcurrentMarkStart,
+  mkG1ConcurrentCleanupStart, mkG1ConcurrentRootRegionScanEnd,
+  mkG1ConcurrentMarkEnd, mkG1ConcurrentCleanupEnd,
+  mkUnparsableLineEvent, mkApplicationStopEvent, mkPrintHeapAtGcEvent
+  ) where
 
 import Data.Decimal
 
@@ -13,11 +40,13 @@ getDuration (Duration d) = d
 class NamedEvent a where eventName :: a -> String
 class TimestampedEvent a where timestamp :: a -> Timestamp
 class BlockingEvent a where duration :: a -> Duration
+class ConcurrentEvent a where concurrentDuration :: a -> Duration
 class TimedEvent a where timingInfo :: a -> Maybe TimingInfo
 class YoungData a where youngData :: a -> RegionUsage
 class OldData a where oldData :: a -> RegionUsage
 class CombinedData a where combinedData :: a -> RegionUsage
 class PermData a where permData :: a -> RegionUsage
+class RegionData a where regionData :: a -> RegionUsage -- for G1GC which doesn't have young/old
 
 
 data UnparsableLineEvent = UnparsableLineEvent String deriving (Eq, Show)
@@ -143,6 +172,90 @@ instance TimedEvent VerboseGcYoungEvent where timingInfo (VerboseGcYoungEvent _ 
 instance CombinedData VerboseGcYoungEvent where  combinedData (VerboseGcYoungEvent _ _ _ c) = c -- or is this Young?
 
 
+-- young pause in G1GC
+-- 1.305: [GC pause (young) 102M->24M(512M), 0.0254200 secs]
+-- 2010-02-26T08:31:51.990-0600: [GC pause (young) 102M->24M(512M), 0.0254200 secs]
+data G1YoungPause = G1YoungPause Timestamp Duration (Maybe TimingInfo) RegionUsage deriving (Eq, Show)
+instance NamedEvent G1YoungPause where eventName _ = "G1_YOUNG_PAUSE"
+instance TimestampedEvent G1YoungPause where timestamp (G1YoungPause t _ _ _) = t
+instance BlockingEvent G1YoungPause where duration (G1YoungPause _ d _ _) = d
+instance TimedEvent G1YoungPause where timingInfo (G1YoungPause _ _ t _) = t
+instance YoungData G1YoungPause where youngData (G1YoungPause _ _ _ r) = r
+
+
+-- mixed pause in G1GC
+-- 1.305: [GC pause (mixed) 102M->24M(512M), 0.0254200 secs]
+-- 2010-02-26T08:31:51.990-0600: [GC pause (mixed) 102M->24M(512M), 0.0254200 secs]
+data G1MixedPause = G1MixedPause Timestamp Duration (Maybe TimingInfo) RegionUsage deriving (Eq, Show)
+instance NamedEvent G1MixedPause where eventName _ = "G1_MIXED_PAUSE"
+instance TimestampedEvent G1MixedPause where timestamp (G1MixedPause t _ _ _) = t
+instance BlockingEvent G1MixedPause where duration (G1MixedPause _ d _ _) = d
+instance TimedEvent G1MixedPause where timingInfo (G1MixedPause _ _ t _) = t
+instance YoungData G1MixedPause where youngData (G1MixedPause _ _ _ r) = r
+
+
+-- initial mark for G1GC
+-- 1.305: [GC pause (young) (initial-mark) 102M->24M(512M), 0.0254200 secs]
+-- 2010-02-26T08:31:51.990-0600: [GC pause (young) (initial-mark) 102M->24M(512M), 0.0254200 secs]
+data G1YoungInitialMarkEvent = G1YoungInitialMarkEvent Timestamp Duration (Maybe TimingInfo) RegionUsage deriving (Eq, Show)
+instance NamedEvent G1YoungInitialMarkEvent where eventName _ = "G1_YOUNG_INITIAL_MARK"
+instance TimestampedEvent G1YoungInitialMarkEvent where timestamp (G1YoungInitialMarkEvent t _ _ _) = t
+instance BlockingEvent G1YoungInitialMarkEvent where duration (G1YoungInitialMarkEvent _ d _ _) = d
+instance TimedEvent G1YoungInitialMarkEvent where timingInfo (G1YoungInitialMarkEvent _ _ t _) = t
+instance YoungData G1YoungInitialMarkEvent where youngData (G1YoungInitialMarkEvent _ _ _ r) = r
+
+-- cleanup phase for G1GC
+-- 18.650: [GC cleanup 297M->236M(512M), 0.0014690 secs]
+-- 2010-02-26T08:31:51.990-0600: [GC cleanup 297M->236M(512M), 0.0014690 secs]
+data G1CleanupEvent = G1CleanupEvent Timestamp Duration (Maybe TimingInfo) RegionUsage deriving (Eq, Show)
+instance NamedEvent G1CleanupEvent where eventName _ = "G1_CLEANUP"
+instance TimestampedEvent G1CleanupEvent where timestamp (G1CleanupEvent t _ _ _) = t
+instance BlockingEvent G1CleanupEvent where duration (G1CleanupEvent _ d _ _) = d
+instance TimedEvent G1CleanupEvent where timingInfo (G1CleanupEvent _ _ t _) = t
+instance YoungData G1CleanupEvent where youngData (G1CleanupEvent _ _ _ r) = r
+
+-- remark for G1GC
+-- 252.889: [GC remark, 0.0178990 secs]
+-- 2010-02-26T08:31:51.990-0600: [GC remark, 0.0178990 secs]
+data G1RemarkEvent = G1RemarkEvent Timestamp Duration (Maybe TimingInfo) deriving (Eq, Show)
+instance NamedEvent G1RemarkEvent where eventName _ = "G1_REMARK"
+instance TimestampedEvent G1RemarkEvent where timestamp (G1RemarkEvent t _ _) = t
+instance BlockingEvent G1RemarkEvent where duration (G1RemarkEvent _ d _) = d
+instance TimedEvent G1RemarkEvent where timingInfo (G1RemarkEvent _ _ t) = t
+
+-- Full GC for G1GC
+-- 5060.152: [Full GC (System.gc()) 2270M->2038M(3398M), 5.8360430 secs]
+-- 2010-02-26T08:31:51.990-0600: [Full GC (System.gc()) 2270M->2038M(3398M), 5.8360430 secs]
+data G1FullGCEvent = G1FullGCEvent Timestamp Duration (Maybe TimingInfo) RegionUsage deriving (Eq, Show)
+instance NamedEvent G1FullGCEvent where eventName _ = "G1_FULL_GC"
+instance TimestampedEvent G1FullGCEvent where timestamp (G1FullGCEvent t _ _ _) = t
+instance BlockingEvent G1FullGCEvent where duration (G1FullGCEvent _ d _ _) = d
+instance TimedEvent G1FullGCEvent where timingInfo (G1FullGCEvent _ _ t _) = t
+instance CombinedData G1FullGCEvent where combinedData (G1FullGCEvent _ _ _ r) = r
+
+-- G1GC concurrent events
+data G1ConcurrentStartEvent = G1ConcurrentStartEvent Timestamp  deriving (Eq, Show)
+instance TimestampedEvent G1ConcurrentStartEvent where timestamp (G1ConcurrentStartEvent t) = t
+data G1ConcurrentEndEvent = G1ConcurrentEndEvent Timestamp Duration (Maybe TimingInfo) deriving (Eq, Show)
+instance TimestampedEvent G1ConcurrentEndEvent where timestamp (G1ConcurrentEndEvent t _ _) = t
+instance ConcurrentEvent G1ConcurrentEndEvent where concurrentDuration (G1ConcurrentEndEvent _ d _) = d
+instance TimedEvent G1ConcurrentEndEvent where timingInfo (G1ConcurrentEndEvent _ _ t) = t
+
+newtype G1ConcurrentRootRegionScanStart = G1ConcurrentRootRegionScanStart G1ConcurrentStartEvent deriving (Eq, Show, TimestampedEvent)
+instance NamedEvent G1ConcurrentRootRegionScanStart where eventName _ = "G1_CONCURRENT_ROOT_REGION_SCAN_START"
+newtype G1ConcurrentMarkStart = G1ConcurrentMarkStart G1ConcurrentStartEvent deriving (Eq, Show, TimestampedEvent)
+instance NamedEvent G1ConcurrentMarkStart where eventName _ = "G1_CONCURRENT_MARK_START"
+newtype G1ConcurrentCleanupStart = G1ConcurrentCleanupStart G1ConcurrentStartEvent deriving (Eq, Show, TimestampedEvent)
+instance NamedEvent G1ConcurrentCleanupStart where eventName _ = "G1_CONCURRENT_CLEANUP_START"
+
+newtype G1ConcurrentRootRegionScanEnd = G1ConcurrentRootRegionScanEnd G1ConcurrentEndEvent deriving (Eq, Show, TimestampedEvent, ConcurrentEvent, TimedEvent)
+instance NamedEvent G1ConcurrentRootRegionScanEnd where eventName _ = "G1_CONCURRENT_ROOT_REGION_SCAN_END"
+newtype G1ConcurrentMarkEnd = G1ConcurrentMarkEnd G1ConcurrentEndEvent deriving (Eq, Show, TimestampedEvent, ConcurrentEvent, TimedEvent)
+instance NamedEvent G1ConcurrentMarkEnd where eventName _ = "G1_CONCURRENT_MARK_END"
+newtype G1ConcurrentCleanupEnd = G1ConcurrentCleanupEnd G1ConcurrentEndEvent deriving (Eq, Show, TimestampedEvent, ConcurrentEvent, TimedEvent)
+instance NamedEvent G1ConcurrentCleanupEnd where eventName _ = "G1_CONCURRENT_CLEANUP_END"
+
+
 -- application time and stop time event
 data ApplicationStopEvent = ApplicationStopEvent Duration (Maybe Duration) [Event] deriving (Eq, Show)
 instance NamedEvent ApplicationStopEvent where eventName _ = "APPLICATION_STOPPED_TIME"
@@ -165,6 +278,18 @@ data Event = ParallelScavengeEvent_ ParallelScavengeEvent
            | SerialSerialPermEvent_ SerialSerialPermEvent
            | VerboseGcOldEvent_ VerboseGcOldEvent
            | VerboseGcYoungEvent_ VerboseGcYoungEvent
+           | G1YoungPause_ G1YoungPause
+           | G1MixedPause_ G1MixedPause
+           | G1YoungInitialMarkEvent_ G1YoungInitialMarkEvent
+           | G1CleanupEvent_ G1CleanupEvent
+           | G1RemarkEvent_ G1RemarkEvent
+           | G1FullGCEvent_ G1FullGCEvent
+           | G1ConcurrentRootRegionScanStart_ G1ConcurrentRootRegionScanStart
+           | G1ConcurrentMarkStart_ G1ConcurrentMarkStart
+           | G1ConcurrentCleanupStart_ G1ConcurrentCleanupStart
+           | G1ConcurrentRootRegionScanEnd_ G1ConcurrentRootRegionScanEnd
+           | G1ConcurrentMarkEnd_ G1ConcurrentMarkEnd
+           | G1ConcurrentCleanupEnd_ G1ConcurrentCleanupEnd
            | ApplicationStopEvent_ ApplicationStopEvent
            | PrintHeapAtGcEvent_ PrintHeapAtGcEvent
            | UnparsableLineEvent_ UnparsableLineEvent
@@ -179,6 +304,18 @@ instance Show Event where
   show (SerialSerialEvent_ e) = show e
   show (SerialSerialPermEvent_ e) = show e
   show (VerboseGcOldEvent_ e) = show e
+  show (G1YoungPause_ e) = show e
+  show (G1MixedPause_ e) = show e
+  show (G1YoungInitialMarkEvent_ e) = show e
+  show (G1CleanupEvent_ e) = show e
+  show (G1RemarkEvent_ e) = show e
+  show (G1FullGCEvent_ e) = show e
+  show (G1ConcurrentRootRegionScanStart_  e) = show e
+  show (G1ConcurrentMarkStart_  e) = show e
+  show (G1ConcurrentCleanupStart_  e) = show e
+  show (G1ConcurrentRootRegionScanEnd_  e) = show e
+  show (G1ConcurrentMarkEnd_  e) = show e
+  show (G1ConcurrentCleanupEnd_ e) = show e
   show (ApplicationStopEvent_ e) = show e
   show (PrintHeapAtGcEvent_ e) = show e
   show (UnparsableLineEvent_ e) = show e
@@ -191,10 +328,22 @@ mkSerialNewEvent = SerialNewEvent_ `dot5` SerialNewEvent
 mkSerialOldEvent = SerialOldEvent_ `dot6` SerialOldEvent
 mkSerialSerialEvent = SerialSerialEvent_ `dot6` SerialSerialEvent
 mkSerialSerialPermEvent = SerialSerialPermEvent_ `dot7` SerialSerialPermEvent
-mkUnparsableLineEvent = UnparsableLineEvent_ . UnparsableLineEvent
-mkApplicationStopEvent = ApplicationStopEvent_ `dot3` ApplicationStopEvent
 mkVerboseGcOldEvent = VerboseGcOldEvent_ `dot4` VerboseGcOldEvent
 mkVerboseGcYoungEvent = VerboseGcYoungEvent_ `dot4` VerboseGcYoungEvent
+mkG1YoungPause = G1YoungPause_ `dot4` G1YoungPause
+mkG1MixedPause = G1MixedPause_ `dot4` G1MixedPause
+mkG1YoungInitialMarkEvent = G1YoungInitialMarkEvent_ `dot4` G1YoungInitialMarkEvent
+mkG1CleanupEvent = G1CleanupEvent_ `dot4` G1CleanupEvent
+mkG1RemarkEvent = G1RemarkEvent_ `dot3` G1RemarkEvent
+mkG1FullGCEvent = G1FullGCEvent_ `dot4` G1FullGCEvent
+mkG1ConcurrentRootRegionScanStart = G1ConcurrentRootRegionScanStart_ . G1ConcurrentRootRegionScanStart . G1ConcurrentStartEvent
+mkG1ConcurrentMarkStart =  G1ConcurrentMarkStart_ . G1ConcurrentMarkStart . G1ConcurrentStartEvent
+mkG1ConcurrentCleanupStart =  G1ConcurrentCleanupStart_ . G1ConcurrentCleanupStart . G1ConcurrentStartEvent
+mkG1ConcurrentRootRegionScanEnd =  (G1ConcurrentRootRegionScanEnd_ . G1ConcurrentRootRegionScanEnd) `dot3` G1ConcurrentEndEvent
+mkG1ConcurrentMarkEnd =  (G1ConcurrentMarkEnd_ . G1ConcurrentMarkEnd) `dot3` G1ConcurrentEndEvent
+mkG1ConcurrentCleanupEnd =  (G1ConcurrentCleanupEnd_ . G1ConcurrentCleanupEnd) `dot3` G1ConcurrentEndEvent
+mkUnparsableLineEvent = UnparsableLineEvent_ . UnparsableLineEvent
+mkApplicationStopEvent = ApplicationStopEvent_ `dot3` ApplicationStopEvent
 mkPrintHeapAtGcEvent = PrintHeapAtGcEvent_ . PrintHeapAtGcEvent
 
 -- higher arity composing operators

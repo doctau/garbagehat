@@ -54,6 +54,18 @@ mergeStats stats event = case event of
   SerialSerialPermEvent_ e -> runReader (addEventCountType >=> mergeTimestamp >=> mergeDuration  >=> mergeCombinedData >=> mergePermData $ stats) e
   VerboseGcOldEvent_ e -> runReader (addEventCountType >=> mergeTimestamp >=> mergeDuration  >=> mergeCombinedData $ stats) e
   VerboseGcYoungEvent_ e -> runReader (addEventCountType >=> mergeTimestamp >=> mergeDuration  >=> mergeCombinedData $ stats) e
+  G1YoungPause_ e -> runReader (addEventCountType >=> mergeTimestamp >=> mergeDuration $ stats) e
+  G1MixedPause_ e -> runReader (addEventCountType >=> mergeTimestamp >=> mergeDuration $ stats) e
+  G1YoungInitialMarkEvent_ e -> runReader (addEventCountType >=> mergeTimestamp >=> mergeDuration $ stats) e
+  G1CleanupEvent_ e -> runReader (addEventCountType >=> mergeTimestamp >=> mergeDuration $ stats) e
+  G1RemarkEvent_ e -> runReader (addEventCountType >=> mergeTimestamp >=> mergeDuration $ stats) e
+  G1FullGCEvent_ e -> runReader (addEventCountType >=> mergeTimestamp >=> mergeDuration  >=> mergeCombinedData $ stats) e
+  G1ConcurrentRootRegionScanStart_  e -> runReader (addEventCountType >=> mergeTimestamp $ stats) e
+  G1ConcurrentMarkStart_   e -> runReader (addEventCountType >=> mergeTimestamp $ stats) e
+  G1ConcurrentCleanupStart_   e -> runReader (addEventCountType >=> mergeTimestamp $ stats) e
+  G1ConcurrentRootRegionScanEnd_   e -> runReader (addEventCountType >=> mergeTimestamp $ stats) e
+  G1ConcurrentMarkEnd_   e -> runReader (addEventCountType >=> mergeTimestamp $ stats) e
+  G1ConcurrentCleanupEnd_   e -> runReader (addEventCountType >=> mergeTimestamp $ stats) e
   ApplicationStopEvent_ (ApplicationStopEvent _ _ inner) -> process stats inner -- add the event types?
   PrintHeapAtGcEvent_ (PrintHeapAtGcEvent inner) -> process stats inner -- add the event types?
   UnparsableLineEvent_ e -> runReader (addEventCountType $ stats) e

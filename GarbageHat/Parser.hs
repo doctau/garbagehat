@@ -2,6 +2,7 @@ module GarbageHat.Parser where
 
 import GarbageHat.Domain
 import Control.Applicative ((<*), (*>), liftA3, Applicative)
+import Data.Foldable (asum)
 import Data.Decimal
 
 import Text.ParserCombinators.Parsec
@@ -27,17 +28,16 @@ parseEvent = do
   <|> try parseApplicationStopTime
   <|> try parsePrintHeapAtGc
   -- <|> unhandledEvent
-  where timestampedEvent t = do
-          try (parseParallelScavenge t)
-          <|> try (parseParNew t)
-          <|> try (parseSerialNew t)
-          <|> try (parseSerialOld t)
-          <|> try (parseSerialSerial t)
-          <|> try (parseSerialSerialPerm t)
-          <|> try (parseParallelSerialOld t)
-          <|> try (parseParallelOldCompacting t)
-          <|> try (parseVerboseGcYoungEvent t)
-          <|> try (parseVerboseGcOldEvent t)
+  where timestampedEvent t = asum $ map (\f -> try $ f t) parsers
+        parsers = [parseParallelScavenge, parseParNew,
+                   parseSerialNew, parseSerialOld, parseSerialSerial,
+                   parseSerialSerialPerm, parseSerialSerialPerm, parseParallelSerialOld,
+                   parseParallelOldCompacting, parseVerboseGcYoungEvent, parseVerboseGcOldEvent,
+                   parseG1YoungPause, parseG1MixedPause, parseG1YoungInitialMarkEvent, parseG1RemarkEvent,
+                   parseG1ConcurrentRootRegionScanStart, parseG1ConcurrentRootRegionScanEnd ,
+                   parseG1ConcurrentMarkStart, parseG1ConcurrentMarkEnd,
+                   parseG1ConcurrentCleanupStart, parseG1ConcurrentCleanupEnd]
+
 
 parseParallelScavenge t = do
   string "[GC"
@@ -136,34 +136,68 @@ parseParallelOldCompacting t = do
   many (char ' ')
   return $ mkParallelOldCompactingEvent t dur timing young old combined perm
 
-parseVerboseGcYoungEvent t = do
-  combined <- surroundedBy (string "[GC ") parseRegion (string ", ")
-  dur <- parseDuration
-  string "]"
-  timing <- optionMaybe (char ' ' >> parseTimesBlock)
-  many (char ' ')
-  return $ mkVerboseGcYoungEvent t dur timing combined
 
-parseVerboseGcOldEvent t = do
-  combined <- surroundedBy (string "[Full GC ") parseRegion (string ", ")
+parseVerboseGcYoungEvent = parseVerboseEvent "GC" mkVerboseGcYoungEvent
+parseVerboseGcOldEvent = parseVerboseEvent "Full GC" mkVerboseGcOldEvent
+parseVerboseEvent id mk t = do
+  combined <- surroundedBy (string $ "[" ++ id ++ " ") parseRegion (string ", ")
   dur <- parseDuration
   string "]"
   timing <- optionMaybe (char ' ' >> parseTimesBlock)
   many (char ' ')
-  return $ mkVerboseGcYoungEvent t dur timing combined
+  return $ mk t dur timing combined
+
+parseG1YoungPause = parseG1Pause "pause (young)" mkG1YoungPause
+parseG1MixedPause = parseG1Pause "pause (mixed)" mkG1MixedPause
+parseG1YoungInitialMarkEvent = parseG1Pause "pause (young) (initial-mark)" mkG1YoungInitialMarkEvent
+parsemkG1CleanupEvent = parseG1Pause "pause cleanup" mkG1CleanupEvent
+parseG1Pause id mk t = do
+  string $ "[GC " ++ id
+  region <- surroundedBy (char ' ') parseRegion (string ", ")
+  dur <- parseDuration
+  string "]"
+  timing <- optionMaybe (char ' ' >> parseTimesBlock)
+  many (char ' ')
+  return $ mk t dur timing region
+
+parseG1FullGCEvent t = do
+  string $ "[Full GC (System.gc())"
+  combined <- surroundedBy (char ' ') parseRegion (string ", ")
+  dur <- parseDuration
+  string "]"
+  timing <- optionMaybe (char ' ' >> parseTimesBlock)
+  many (char ' ')
+  return $ mkG1FullGCEvent t dur timing combined
+
+parseG1RemarkEvent = parseG1PeriodEvent "remark" mkG1RemarkEvent
+parseG1ConcurrentRootRegionScanStart = parseG1StartEvent "concurrent-root-region-scan-start" mkG1ConcurrentRootRegionScanStart
+parseG1ConcurrentRootRegionScanEnd = parseG1PeriodEvent "concurrent-root-region-scan-end" mkG1ConcurrentRootRegionScanEnd
+parseG1ConcurrentMarkStart = parseG1StartEvent "concurrent-mark-start" mkG1ConcurrentMarkStart
+parseG1ConcurrentMarkEnd = parseG1PeriodEvent "concurrent-mark-end" mkG1ConcurrentMarkEnd
+parseG1ConcurrentCleanupStart = parseG1StartEvent "concurrent-cleanup-start" mkG1ConcurrentCleanupStart
+parseG1ConcurrentCleanupEnd = parseG1PeriodEvent "concurrent-cleanup-end" mkG1ConcurrentCleanupEnd
+
+parseG1PeriodEvent id mk t = do
+  string $ "[GC " ++ id ++ ", "
+  dur <- parseDuration
+  char ']'
+  timing <- optionMaybe (char ' ' >> parseTimesBlock)
+  many (char ' ')
+  return $ mk t dur timing
+
+parseG1StartEvent id mk t = do
+  string $ "[GC " ++ id
+  char ']'
+  many (char ' ')
+  return $ mk t
+
 
 -- helpers
-parseDefNew = do
-  parseTimestamp >> string ": [DefNew"
-  young <- parseRegion
-  string ", " >> parseDuration >> string "]"
-  return young
-
-parseTenured = do
-  parseTimestamp >> string ": [Tenured"
-  old <- parseRegion
-  string ", " >> parseDuration >> string "]"
-  return old
+parseDefNew = parseSimpleRegion "DefNew"
+parseTenured = parseSimpleRegion "Tenured"
+parseSimpleRegion id =  surroundedBy timestamp parseRegion (duration >> many (char ' ')) where
+    timestamp = parseTimestamp >> (string $ ": [" ++ id)
+    duration = string ", " >> parseDuration >> string "]"
 
 parseRegion :: GenParser Char st RegionUsage
 parseRegion = do
@@ -179,8 +213,7 @@ parseDuration = fmap Duration $ fractional <* string " secs"
 parseSize :: GenParser Char st Integer
 parseSize = do
   s <- nat
-  optionMaybe $ char ' '
-  char 'K'
+  (optionMaybe $ char ' ') >> char 'K'
   return s
 
 parseTimesBlock :: GenParser Char st TimingInfo
