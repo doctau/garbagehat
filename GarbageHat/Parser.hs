@@ -34,9 +34,10 @@ parseEvent =
                    parseSerialSerialPerm, parseSerialSerialPerm, parseParallelSerialOld,
                    parseParallelOldCompacting, parseVerboseGcYoungEvent, parseVerboseGcOldEvent,
                    parseG1YoungPause, parseG1MixedPause, parseG1YoungInitialMarkEvent, parseG1RemarkEvent,
-                   parseG1ConcurrentRootRegionScanStart, parseG1ConcurrentRootRegionScanEnd ,
+                   parseG1ConcurrentRootRegionScanStart, parseG1ConcurrentRootRegionScanEnd,
                    parseG1ConcurrentMarkStart, parseG1ConcurrentMarkEnd,
-                   parseG1ConcurrentCleanupStart, parseG1ConcurrentCleanupEnd]
+                   parseG1ConcurrentCleanupStart, parseG1ConcurrentCleanupEnd,
+                   parseG1CleanupEvent]
 
 
 parseParallelScavenge t = do
@@ -150,7 +151,7 @@ parseVerboseEvent id mk t = do
 parseG1YoungPause = parseG1Pause "pause (young)" mkG1YoungPause
 parseG1MixedPause = parseG1Pause "pause (mixed)" mkG1MixedPause
 parseG1YoungInitialMarkEvent = parseG1Pause "pause (young) (initial-mark)" mkG1YoungInitialMarkEvent
-parsemkG1CleanupEvent = parseG1Pause "pause cleanup" mkG1CleanupEvent
+parseG1CleanupEvent = parseG1Pause "cleanup" mkG1CleanupEvent --pause cleanup
 parseG1Pause id mk t = do
   string $ "[GC " ++ id
   region <- surroundedBy (char ' ') parseRegion (string ", ")
