@@ -27,7 +27,7 @@ parseEvent = do
   try (parseTimestamp >>= timestampedEvent)
   <|> try parseApplicationStopTime
   <|> try parsePrintHeapAtGc
-  -- <|> unhandledEvent
+  <|> unhandledEvent
   where timestampedEvent t = asum $ map (\f -> try $ f t) parsers
         parsers = [parseParallelScavenge, parseParNew,
                    parseSerialNew, parseSerialOld, parseSerialSerial,
@@ -213,8 +213,12 @@ parseDuration = fmap Duration $ fractional <* string " secs"
 parseSize :: GenParser Char st Integer
 parseSize = do
   s <- nat
-  (optionMaybe $ char ' ') >> char 'K'
-  return s
+  multiple <- (optionMaybe $ char ' ') >> sizeChar
+  return (s * multiple)
+  where sizeChar = do 
+          try (char 'K' >> return 1)
+          <|> (char 'M' >> return 1024)
+          <|> (char 'G' >> return (1024 * 1024))
 
 parseTimesBlock :: GenParser Char st TimingInfo
 parseTimesBlock = do
