@@ -260,7 +260,7 @@ instance NamedEvent G1ConcurrentCleanupEnd where eventName _ = "G1_CONCURRENT_CL
 data ApplicationStopEvent = ApplicationStopEvent Duration (Maybe Duration) [Event] deriving (Eq, Show)
 instance NamedEvent ApplicationStopEvent where eventName _ = "APPLICATION_STOPPED_TIME"
 instance BlockingEvent ApplicationStopEvent where
-  duration (ApplicationStopEvent _ Nothing _) = Duration $ fromIntegral 0
+  duration (ApplicationStopEvent _ Nothing _) = Duration 0
   duration (ApplicationStopEvent _ (Just s) _) = s
 
 -- GC statistics dump
@@ -347,9 +347,9 @@ mkApplicationStopEvent = ApplicationStopEvent_ `dot3` ApplicationStopEvent
 mkPrintHeapAtGcEvent = PrintHeapAtGcEvent_ . PrintHeapAtGcEvent
 
 -- higher arity composing operators
-dot2 = ((.).(.))
-dot3 = ((.).(.).(.))
-dot4 = ((.).(.).(.).(.))
-dot5 = ((.).(.).(.).(.).(.))
-dot6 = ((.).(.).(.).(.).(.).(.))
-dot7 = ((.).(.).(.).(.).(.).(.).(.))
+dot2 = (.).(.)
+dot3 = (.).(.).(.)
+dot4 = (.).(.).(.).(.)
+dot5 = (.).(.).(.).(.).(.)
+dot6 = (.).(.).(.).(.).(.).(.)
+dot7 = (.).(.).(.).(.).(.).(.).(.)

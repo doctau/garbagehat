@@ -1,7 +1,7 @@
 module GarbageHat.Parser where
 
 import GarbageHat.Domain
-import Control.Applicative ((<*), (*>), liftA3, Applicative)
+import Control.Applicative ((<*), (*>), (<$>), liftA3, Applicative)
 import Data.Foldable (asum)
 import Data.Decimal
 
@@ -12,7 +12,7 @@ import Debug.Trace (trace, traceShow)
 
 
 parseInput :: String -> String -> Either ParseError [Event]
-parseInput name input = parse parseLines name input
+parseInput = parse parseLines
 
 parseLines :: GenParser Char st [Event]
 parseLines = endBy parseEvent eol
@@ -23,7 +23,7 @@ eol = do
   <|> eof
 
 parseEvent :: GenParser Char st Event
-parseEvent = do
+parseEvent =
   try (parseTimestamp >>= timestampedEvent)
   <|> try parseApplicationStopTime
   <|> try parsePrintHeapAtGc
@@ -161,7 +161,7 @@ parseG1Pause id mk t = do
   return $ mk t dur timing region
 
 parseG1FullGCEvent t = do
-  string $ "[Full GC (System.gc())"
+  string "[Full GC (System.gc())"
   combined <- surroundedBy (char ' ') parseRegion (string ", ")
   dur <- parseDuration
   string "]"
@@ -208,14 +208,14 @@ parseRegion = do
   return $ RegionUsage before after capacity
 
 parseDuration :: GenParser Char st Duration
-parseDuration = fmap Duration $ fractional <* string " secs"
+parseDuration = Duration <$> fractional <* string " secs"
 
 parseSize :: GenParser Char st Integer
 parseSize = do
   s <- nat
   multiple <- (optionMaybe $ char ' ') >> sizeChar
   return (s * multiple)
-  where sizeChar = do 
+  where sizeChar =
           try (char 'K' >> return 1)
           <|> (char 'M' >> return 1024)
           <|> (char 'G' >> return (1024 * 1024))
@@ -230,7 +230,7 @@ parseTimesBlock = do
 
 
 parseTimestamp :: GenParser Char st Timestamp
-parseTimestamp = do
+parseTimestamp =
   try parseTime
   <|> parseDateAndTime
   <|> parseDate
@@ -253,9 +253,9 @@ parseTimestamp = do
   
 parseApplicationStopTime :: GenParser Char st Event
 parseApplicationStopTime = do
-  ran <- fmap Duration $ surroundedBy (string "Application time: ") fractional (string " seconds\n")
+  ran <- Duration <$> surroundedBy (string "Application time: ") fractional (string " seconds\n")
   inner <- endBy parseEvent eol -- there may be GC events between the pair
-  stopped <- optionMaybe $ fmap Duration $ surroundedBy (string "Total time for which application threads were stopped: ") fractional (string " seconds")
+  stopped <- optionMaybe $ Duration <$> surroundedBy (string "Total time for which application threads were stopped: ") fractional (string " seconds")
   return $ mkApplicationStopEvent ran stopped inner
 
 parsePrintHeapAtGc :: GenParser Char st Event

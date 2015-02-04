@@ -68,7 +68,7 @@ mergeStats stats event = case event of
   G1ConcurrentCleanupEnd_   e -> runReader (addEventCountType >=> mergeTimestamp $ stats) e
   ApplicationStopEvent_ (ApplicationStopEvent _ _ inner) -> process stats inner -- add the event types?
   PrintHeapAtGcEvent_ (PrintHeapAtGcEvent inner) -> process stats inner -- add the event types?
-  UnparsableLineEvent_ e -> runReader (addEventCountType $ stats) e
+  UnparsableLineEvent_ e -> runReader (addEventCountType stats) e
 
 computeThroughput stats = case (firstTimestamp stats, lastTimestamp stats) of
  (Timestamp (Just start) _, Timestamp (Just end) _) -> stats {throughput = Just $ 1.0 - (getDuration (totalPause stats)  / (end - start))}
@@ -86,7 +86,7 @@ mergeTimestamp stats = fmap step ask where
   tsop :: (Decimal -> Decimal -> Bool) -> Timestamp -> Timestamp -> Timestamp
   tsop _ (Timestamp Nothing _) y@(Timestamp (Just _) _) = y
   tsop _ x@(Timestamp (Just _) _) (Timestamp Nothing _) = x
-  tsop pickFirst x@(Timestamp (Just a) _) y@(Timestamp (Just b) _) = if (pickFirst a b) then x else y
+  tsop pickFirst x@(Timestamp (Just a) _) y@(Timestamp (Just b) _) = if pickFirst a b then x else y
 
 mergeDuration :: BlockingEvent a => StatisticsSummary -> Reader a StatisticsSummary
 mergeDuration stats = fmap step ask where
@@ -94,11 +94,11 @@ mergeDuration stats = fmap step ask where
 
 mergeCombinedData :: CombinedData a => StatisticsSummary -> Reader a StatisticsSummary
 mergeCombinedData stats = fmap step ask where
-  step e = stats {maxHeapCapacity = (maxHeapCapacity stats) `max` (regionCapacity . combinedData $ e),
-                  maxHeapUsage    = (maxHeapCapacity stats) `max` (regionBefore . combinedData $ e) `max` (regionAfter . combinedData $ e)}
+  step e = stats {maxHeapCapacity = maxHeapCapacity stats `max` (regionCapacity . combinedData $ e),
+                  maxHeapUsage    = maxHeapCapacity stats `max` (regionBefore . combinedData $ e) `max` (regionAfter . combinedData $ e)}
 
 mergePermData :: PermData a => StatisticsSummary -> Reader a StatisticsSummary
 mergePermData stats = fmap step ask where
-  step e = stats {maxPermCapacity = (maxPermCapacity stats) `max` (regionCapacity . permData $ e),
-                  maxPermUsage    = (maxPermUsage stats) `max` (regionBefore . permData $ e) `max` (regionAfter . permData $ e)}
+  step e = stats {maxPermCapacity = maxPermCapacity stats `max` (regionCapacity . permData $ e),
+                  maxPermUsage    = maxPermUsage stats `max` (regionBefore . permData $ e) `max` (regionAfter . permData $ e)}
 
